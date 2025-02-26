@@ -1,7 +1,7 @@
 
 
+import 'package:fpdart/fpdart.dart';
 import 'package:weave_it/core/failure/failure.dart';
-import 'package:weave_it/core/model/either.dart';
 import 'package:weave_it/features/auth/domain/model/user_model.dart';
 
 abstract interface class AuthRepository {
@@ -18,7 +18,7 @@ abstract interface class AuthRepository {
 
   Future<Either<Failure, UserModel>> currentUser();
 
-  Future<Either<Failure, UserModel>> logout();
+  Future<Either<Failure, void>> logout();
 
   // Edit user profile
   Future<Either<Failure, UserModel>> editUser({
