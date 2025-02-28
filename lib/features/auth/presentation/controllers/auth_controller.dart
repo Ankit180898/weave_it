@@ -10,34 +10,18 @@ class AuthController extends GetxController {
 
   AuthController(this._authRepository);
 
-  Future<void> signUp(String name, String email, String password) async {
-    isLoading.value = true;
-    final result = await _authRepository.signUpWithEmailPassword(
-        name: name, email: email, password: password);
+  // Sign in with Google
+  Future<void> signInWithGoogle() async {
+    try {
+      isLoading.value = true;
+      errorMessage.value = '';
 
-    result.fold(
-      (failure) => errorMessage.value = failure.message,
-      (userData) => user.value = userData,
-    );
-
-    isLoading.value = false;
-  }
-
-  Future<void> login(String email, String password) async {
-    isLoading.value = true;
-    final result = await _authRepository.loginWithEmailPassword(
-        email: email, password: password);
-
-    result.fold(
-      (failure) => errorMessage.value = failure.message,
-      (userData) => user.value = userData,
-    );
-
-    isLoading.value = false;
-  }
-
-  Future<void> logout() async {
-    await _authRepository.logout();
-    user.value = null;
+      final result = await _authRepository.signInWithGoogle();
+      result.fold((l) => errorMessage.value = l.message, (r) => user.value = r);
+    } catch (e) {
+      errorMessage.value = 'An unexpected error occurred.';
+    } finally {
+      isLoading.value = false;
+    }
   }
 }

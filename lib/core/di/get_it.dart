@@ -1,4 +1,5 @@
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:get/get.dart';
 import 'package:get_it/get_it.dart';
 import 'package:internet_connection_checker_plus/internet_connection_checker_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -11,8 +12,6 @@ import 'package:weave_it/features/auth/presentation/controllers/auth_controller.
 final serviceLocator = GetIt.instance;
 
 Future<void> initDependencies() async {
-  _initAuth();
-
   // Load environment variables
   await dotenv.load(fileName: '.env');
 
@@ -20,32 +19,38 @@ Future<void> initDependencies() async {
   final supaUri = dotenv.env['SUPABASE_URL'];
   final supaAnon = dotenv.env['SUPABASE_ANONKEY'];
 
-  // Check if environment variables are properly loaded
   if (supaUri == null || supaAnon == null) {
     throw Exception('Missing Supabase credentials in the .env file');
   }
 
   // Initialize Supabase
-  final supabase = await Supabase.initialize(url: supaUri, anonKey: supaAnon);
-  serviceLocator.registerLazySingleton(() => supabase.client);
+  await Supabase.initialize(url: supaUri, anonKey: supaAnon);
+  final supabaseClient = Supabase.instance.client;
+  serviceLocator.registerLazySingleton(() => supabaseClient);
+
+  // Register InternetConnection
   serviceLocator.registerFactory(() => InternetConnection());
 
-  // core
+  // Register ConnectionChecker
   serviceLocator.registerFactory<ConnectionChecker>(
     () => ConnectionCheckerImpl(serviceLocator()),
   );
+
+  // Initialize Auth dependencies
+  _initAuth();
 }
 
 void _initAuth() {
   // Datasource
-  serviceLocator
-    ..registerFactory<AuthRemoteDataSource>(
-      () => AuthRemoteDataSourceImpl(serviceLocator()),
-    )
-    // Repository
-    ..registerFactory<AuthRepository>(
-      () => AuthRepositoryImpl(serviceLocator(), serviceLocator()),
-    )
-    // Controller
-    ..registerLazySingleton(() => AuthController(serviceLocator()));
+  serviceLocator.registerFactory<AuthRemoteDataSource>(
+    () => AuthRemoteDataSourceImpl(serviceLocator()),
+  );
+
+  // Repository
+  serviceLocator.registerFactory<AuthRepository>(
+    () => AuthRepositoryImpl(serviceLocator(), serviceLocator()),
+  );
+
+  // Use Get.put() to register AuthController with GetX
+  Get.put(AuthController(serviceLocator()));
 }

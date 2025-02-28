@@ -1,4 +1,8 @@
 class ServerExceptions implements Exception {
   final String message;
-  const ServerExceptions(this.message);
+
+  ServerExceptions(this.message);
+
+  @override
+  String toString() => 'ServerExceptions: $message';
 }
