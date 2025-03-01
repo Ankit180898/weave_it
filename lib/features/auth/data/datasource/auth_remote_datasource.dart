@@ -1,4 +1,3 @@
-import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:weave_it/core/failure/server_exception.dart';
@@ -23,80 +22,75 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
   final GoogleSignIn _googleSignIn = GoogleSignIn(
     serverClientId:
         '581088833405-ub1dcavjot4mril331fkpgud9n2mvhi5.apps.googleusercontent.com',
+    scopes: ['email', 'profile', 'openid'],
   );
-
   @override
   Future<UserModel> signInWithGoogle() async {
     try {
-      // Sign out previous Google session (if any)
-      await _googleSignIn.signOut();
-
-      // Start Google Sign-In Flow
+      print('Starting Google Sign-In flow...');
       final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
       if (googleUser == null) {
         throw ServerExceptions('Google Sign-In was canceled by the user.');
       }
+      print('Google Sign-In successful. User: ${googleUser.email}');
 
-      // Get authentication details
       final GoogleSignInAuthentication googleAuth =
           await googleUser.authentication;
-
-      final idToken = googleAuth.idToken;
-      final accessToken = googleAuth.accessToken;
-
+      final String? idToken = googleAuth.idToken;
+      final String? accessToken = googleAuth.accessToken;
       if (idToken == null) {
-        throw ServerExceptions(
-          'No ID Token found. Check Google Cloud Console configuration.',
-        );
+        throw ServerExceptions('Failed to retrieve Google ID Token.');
       }
+      print(
+        'Google ID Token retrieved. Access Token: $accessToken',
+      ); // Log access token for debugging
 
-      // Sign in with Supabase using Google OAuth
-      final AuthResponse res = await supabaseClient.auth.signInWithIdToken(
+      print('Signing in to Supabase with Google ID Token...');
+      final AuthResponse response = await supabaseClient.auth.signInWithIdToken(
         provider: OAuthProvider.google,
         idToken: idToken,
-        accessToken: accessToken,
+        accessToken: accessToken, // Ensure access_token is included if needed
       );
 
-      if (res.session == null) {
-        throw ServerExceptions('Failed to authenticate with Supabase.');
-      }
-
-      final User user = res.user!;
-      final String userId = user.id;
-
-      // Wait for Supabase trigger to insert the user
-      await Future.delayed(const Duration(milliseconds: 800));
-
-      // Retry logic: Check if user exists in 'users' table
-      Map<String, dynamic>? userData;
-      int retries = 5;
-      while (retries > 0) {
-        userData = await supabaseClient
-            .from('users')
-            .select()
-            .eq('id', userId)
-            .maybeSingle();
-
-        if (userData != null) break;
-        await Future.delayed(const Duration(milliseconds: 300));
-        retries--;
-      }
-
-      // If userData is still null, throw an error
-      if (userData == null) {
+      final Session? session = response.session;
+      if (session == null) {
         throw ServerExceptions(
-            'User data was not inserted into the users table.');
+          'Google Sign-In failed: No session established.',
+        );
       }
+      print('Supabase session established. User ID: ${session.user.id}');
+      print('User metadata: ${session.user.userMetadata}');
+
+      final User user = session.user;
+      if (user.email == null) {
+        throw ServerExceptions('User ID or email is null.');
+      }
+
+      final Map<String, dynamic> userData = {
+        'id': user.id,
+        'email': user.email,
+        'display_name':
+            user.userMetadata?['name'] ?? googleUser.displayName ?? user.email,
+        'avatar_url':
+            user.userMetadata?['picture'] ?? googleUser.photoUrl ?? '',
+        'updated_at': DateTime.now().toIso8601String(),
+      };
+
+      print('User data to upsert: $userData');
+      final upsertResponse = await supabaseClient
+          .from('users')
+          .upsert(userData, onConflict: 'id');
+      print('Upsert response: $upsertResponse');
 
       return UserModel(
-        id: userId,
-        name: userData['display_name'] ?? googleUser.displayName ?? '',
-        email: userData['email'] ?? user.email ?? '',
-        avatar_url: userData['avatar_url'] ?? googleUser.photoUrl ?? '',
+        id: user.id,
+        name: userData['display_name'],
+        email: userData['email'],
+        avatar_url: userData['avatar_url'],
       );
     } catch (e) {
-      debugPrint("Google Sign-In Error: ${e.toString()}");
-      throw ServerExceptions(e.toString());
+      print('Error during Google Sign-In: $e');
+      throw ServerExceptions('Failed to sign in with Google: $e');
     }
   }
 
@@ -107,11 +101,12 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
       if (session == null) return null;
 
       final userId = session.user.id;
-      final userData = await supabaseClient
-          .from('users')
-          .select()
-          .eq('id', userId)
-          .maybeSingle();
+      final userData =
+          await supabaseClient
+              .from('users')
+              .select()
+              .eq('id', userId)
+              .maybeSingle();
 
       return userData != null ? UserModel.fromJson(userData) : null;
     } catch (e) {
