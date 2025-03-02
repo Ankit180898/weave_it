@@ -13,6 +13,7 @@ abstract class AuthRemoteDataSource {
 
 class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
   final SupabaseClient supabaseClient;
+  static const String usersTable = 'app_users'; // Renamed table to avoid conflict
 
   AuthRemoteDataSourceImpl(this.supabaseClient);
 
@@ -24,6 +25,7 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
         '581088833405-ub1dcavjot4mril331fkpgud9n2mvhi5.apps.googleusercontent.com',
     scopes: ['email', 'profile', 'openid'],
   );
+
   @override
   Future<UserModel> signInWithGoogle() async {
     try {
@@ -32,55 +34,44 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
       if (googleUser == null) {
         throw ServerExceptions('Google Sign-In was canceled by the user.');
       }
+
       print('Google Sign-In successful. User: ${googleUser.email}');
 
-      final GoogleSignInAuthentication googleAuth =
-          await googleUser.authentication;
+      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
       final String? idToken = googleAuth.idToken;
       final String? accessToken = googleAuth.accessToken;
+
       if (idToken == null) {
         throw ServerExceptions('Failed to retrieve Google ID Token.');
       }
-      print(
-        'Google ID Token retrieved. Access Token: $accessToken',
-      ); // Log access token for debugging
 
       print('Signing in to Supabase with Google ID Token...');
       final AuthResponse response = await supabaseClient.auth.signInWithIdToken(
         provider: OAuthProvider.google,
         idToken: idToken,
-        accessToken: accessToken, // Ensure access_token is included if needed
+        accessToken: accessToken,
       );
 
       final Session? session = response.session;
       if (session == null) {
-        throw ServerExceptions(
-          'Google Sign-In failed: No session established.',
-        );
+        throw ServerExceptions('Google Sign-In failed: No session established.');
       }
-      print('Supabase session established. User ID: ${session.user.id}');
-      print('User metadata: ${session.user.userMetadata}');
 
       final User user = session.user;
       if (user.email == null) {
-        throw ServerExceptions('User ID or email is null.');
+        throw ServerExceptions('User email is null.');
       }
 
       final Map<String, dynamic> userData = {
         'id': user.id,
         'email': user.email,
-        'display_name':
-            user.userMetadata?['name'] ?? googleUser.displayName ?? user.email,
-        'avatar_url':
-            user.userMetadata?['picture'] ?? googleUser.photoUrl ?? '',
+        'display_name': user.userMetadata?['name'] ?? googleUser.displayName ?? user.email,
+        'avatar_url': user.userMetadata?['picture'] ?? googleUser.photoUrl ?? '',
         'updated_at': DateTime.now().toIso8601String(),
       };
 
-      print('User data to upsert: $userData');
-      final upsertResponse = await supabaseClient
-          .from('users')
-          .upsert(userData, onConflict: 'id');
-      print('Upsert response: $upsertResponse');
+      print('Upserting user data into $usersTable: $userData');
+
 
       return UserModel(
         id: user.id,
@@ -102,11 +93,7 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
 
       final userId = session.user.id;
       final userData =
-          await supabaseClient
-              .from('users')
-              .select()
-              .eq('id', userId)
-              .maybeSingle();
+          await supabaseClient.from(usersTable).select().eq('id', userId).maybeSingle();
 
       return userData != null ? UserModel.fromJson(userData) : null;
     } catch (e) {
@@ -119,6 +106,7 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
     try {
       await _googleSignIn.signOut();
       await supabaseClient.auth.signOut();
+      print('User successfully logged out.');
     } on AuthException catch (e) {
       throw ServerExceptions(e.message);
     } catch (e) {
@@ -129,11 +117,13 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
   @override
   Future<void> deleteUser({required String userId}) async {
     try {
-      // Delete user from Supabase Auth
+      print('Deleting user $userId from Supabase Auth...');
       await supabaseClient.auth.admin.deleteUser(userId);
 
-      // Delete user from 'users' table
-      await supabaseClient.from('users').delete().eq('id', userId);
+      print('Deleting user data from $usersTable...');
+      await supabaseClient.from(usersTable).delete().eq('id', userId);
+
+      print('User deletion successful.');
     } catch (e) {
       throw ServerExceptions(e.toString());
     }
